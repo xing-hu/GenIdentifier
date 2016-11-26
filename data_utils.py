@@ -4,7 +4,7 @@ import math
 import pickle
 import sqlite3
 from collections import OrderedDict
-
+from tensorflow.python.platform import gfile
 import numpy as np
 from tqdm import tqdm
 import tensorflow as tf
@@ -17,12 +17,28 @@ import collections
 import nltk
 import sys
 
+# Special vocabulary symbols - we always put them at the start.
+_PAD = b"_PAD"
+_GO = b"_GO"
+_EOS = b"_EOS"
+_UNK = b"_UNK"
+_START_VOCAB = [_PAD, _GO, _EOS, _UNK]
+
+PAD_ID = 0
+GO_ID = 1
+EOS_ID = 2
+UNK_ID = 3
+
+# Regular expressions used to tokenize.
+_WORD_SPLIT = re.compile(b"([.,!?\"':;)(])")
+_DIGIT_RE = re.compile(br"\d")
+
 
 def camel_cut(name):
     ans = []
     start, end = 0, len(name)
-    for i in range(1, len(name)-1):
-        if name[i].isupper() and name[i+1].islower() and name[i-1] != ' ':
+    for i in range(1, len(name) - 1):
+        if name[i].isupper() and name[i + 1].islower() and name[i - 1] != ' ':
             end = i
             ans.append(name[start: end].lower())
             start, end = i, len(name)
@@ -139,12 +155,13 @@ def gen_vocab(identifier):
     return nl_vocab, name_vocab
 
 
-#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^#
+# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^#
 
 
 def with_path(p):
     current_dir = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(current_dir, p)
+
 
 NAME_DICTIONARY_PATH = 'data/method_name_vocab.json'
 NL_DICTIONARY_PATH = 'data/method_nl_vocab.json'
@@ -160,6 +177,7 @@ buckets = [
     (30, 15)
 ]
 
+
 def time(s):
     ret = ''
     if s >= 60 * 60:
@@ -174,6 +192,7 @@ def time(s):
         s = math.floor(s)
         ret += '{}s'.format(s)
     return ret
+
 
 def load_dictionary():
     with open(with_path(NL_DICTIONARY_PATH), 'r') as fp:
@@ -195,15 +214,18 @@ def load_dictionary():
     return ask_dim, ask_dictionary, ask_index_word, ask_word_index, \
            answer_dim, answer_dictionary, answer_index_word, answer_word_index
 
+
 def save_model(sess, name='model.ckpt'):
     if not os.path.exists('model'):
         os.makedirs('model')
     saver = tf.train.Saver()
     saver.save(sess, with_path('model/' + name))
 
+
 def load_model(sess, name='model.ckpt'):
     saver = tf.train.Saver()
     saver.restore(sess, with_path('model/' + name))
+
 
 ask_dim, ask_dictionary, ask_index_word, ask_word_index, \
 answer_dim, answer_dictionary, answer_index_word, answer_word_index = load_dictionary()
@@ -221,8 +243,8 @@ ANSWER_UNK_ID = answer_word_index[UNK]
 ANSWER_PAD_ID = answer_word_index[PAD]
 ANSWER_GO_ID = answer_word_index[GO]
 
-class BucketData(object):
 
+class BucketData(object):
     def __init__(self, buckets_dir, encoder_size, decoder_size):
         self.encoder_size = encoder_size
         self.decoder_size = decoder_size
@@ -247,6 +269,7 @@ class BucketData(object):
                 if ask is not None and answer is not None:
                     return ask, answer
 
+
 def read_bucket_dbs(buckets_dir):
     ret = []
     for encoder_size, decoder_size in buckets:
@@ -254,25 +277,28 @@ def read_bucket_dbs(buckets_dir):
         ret.append(bucket_data)
     return ret
 
+
 def sentence_indice_ask(sentence):
     words = sentence.split(' ')
     ret = []
-    for  word in words:
+    for word in words:
         if word in ask_word_index:
             ret.append(ask_word_index[word])
         else:
             ret.append(ask_word_index[UNK])
     return ret
 
+
 def sentence_indice_answer(sentence):
     words = sentence.split(' ')
     ret = []
-    for  word in words:
+    for word in words:
         if word in answer_word_index:
             ret.append(answer_word_index[word])
         else:
             ret.append(answer_word_index[UNK])
     return ret
+
 
 def indice_sentence_ask(indice):
     words = indice.split(' ')
@@ -285,6 +311,7 @@ def indice_sentence_ask(indice):
             ret.append(word)
     return ''.join(ret)
 
+
 def indice_sentence_answer(indice):
     words = indice.split(' ')
     ret = []
@@ -296,20 +323,24 @@ def indice_sentence_answer(indice):
             ret.append(word)
     return ''.join(ret)
 
+
 def vector_sentence_ask(vector):
     return indice_sentence_ask(vector.argmax(axis=1))
 
+
 def vector_sentence_answer(vector):
     return indice_sentence_answer(vector.argmax(axis=1))
+
 
 def generate_bucket_dbs(
         input_dir,
         output_dir,
         buckets,
         tolerate_unk=2
-    ):
+):
     count = 0
     pool = {}
+
     def _get_conn(key):
         if key not in pool:
             if not os.path.exists(output_dir):
@@ -318,10 +349,11 @@ def generate_bucket_dbs(
             path = os.path.join(output_dir, name)
             conn = sqlite3.connect(path)
             cur = conn.cursor()
-            cur.execute("""CREATE TABLE IF NOT EXISTS conversation (ask text, answer text);""")
+            cur.execute("""CREATE TABLE IF NOT EXISTS conversation (ask TEXT, answer TEXT);""")
             conn.commit()
             pool[key] = (conn, cur)
         return pool[key]
+
     all_inserted = {}
     for encoder_size, decoder_size in buckets:
         key = (encoder_size, decoder_size)
@@ -337,6 +369,7 @@ def generate_bucket_dbs(
         print('读取数据库: {}'.format(db_path))
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
+
         def is_valid_ask(s):
             words = s.split(' ')
             unk = 0
@@ -346,6 +379,7 @@ def generate_bucket_dbs(
             if unk > tolerate_unk:
                 return False
             return True
+
         def is_valid_answer(s):
             words = s.split(' ')
             unk = 0
@@ -355,13 +389,16 @@ def generate_bucket_dbs(
             if unk > tolerate_unk:
                 return False
             return True
+
         def sen_length(sen):
             return len(sen.split(' '))
+
         # 读取最大的rowid，如果rowid是连续的，结果就是里面的数据条数
         # 比SELECT COUNT(1)要快
         total = c.execute('''SELECT MAX(ROWID) FROM conversation;''').fetchall()[0][0]
         ret = c.execute('''SELECT ask, answer FROM conversation;''')
         wait_insert = []
+
         def _insert(wait_insert):
             if len(wait_insert) > 0:
                 for encoder_size, decoder_size, ask, answer in wait_insert:
@@ -375,13 +412,14 @@ def generate_bucket_dbs(
                     conn.commit()
                 wait_insert = []
             return wait_insert
+
         for ask, answer in tqdm(ret, total=total):
             if is_valid_ask(ask) and is_valid_answer(answer):
                 for i in range(len(buckets)):
                     encoder_size, decoder_size = buckets[i]
-                    #print(sen_length(ask), '/' , encoder_size, " ", sen_length(answer), '/', decoder_size)
+                    # print(sen_length(ask), '/' , encoder_size, " ", sen_length(answer), '/', decoder_size)
                     if sen_length(ask) <= encoder_size and sen_length(answer) < decoder_size:
-                        #print('insert')
+                        # print('insert')
                         count = count + 1
                         wait_insert.append((encoder_size, decoder_size, ask, answer))
                         if len(wait_insert) > 1000000:
@@ -390,14 +428,4 @@ def generate_bucket_dbs(
     wait_insert = _insert(wait_insert)
     print(count)
     return all_inserted
-
-if __name__ == '__main__':
-    print('generate bucket dbs')
-    all_inserted = generate_bucket_dbs('./db', './bucket_dbs', buckets, 2)
-    for key, inserted_count in all_inserted.items():
-        print(key)
-        print(inserted_count)
-    print('done')
-
-
 
