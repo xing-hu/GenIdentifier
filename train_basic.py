@@ -48,7 +48,7 @@ FLAGS = tf.app.flags.FLAGS
 _buckets = [(15, 2),
     (20, 3),
     (25, 4),
-    (100, 20)]
+    (30, 15)]
 
 
 def read_data(source_path, target_path, max_size=None):

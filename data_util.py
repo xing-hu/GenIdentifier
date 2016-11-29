@@ -26,15 +26,16 @@ _DIGIT_RE = re.compile(br"\d")
 
 
 def camel_cut(name):
-    name = name.strip()
+    name = name.strip().split()
     ans = []
-    start, end = 0, len(name)
-    for i in range(1, len(name) - 1):
-        if name[i].isupper() and name[i + 1].islower() and name[i - 1] != '':
-            end = i
-            ans.append(name[start: end].lower())
-            start, end = i, len(name)
-    ans.append(name[start: end].lower())
+    for n in name:
+        start, end = 0, len(n)
+        for i in range(1, len(n) - 1):
+            if n[i].isupper() and n[i + 1].islower() and n[i - 1] != '':
+                end = i
+                ans.append(n[start: end].lower())
+                start, end = i, len(n)
+        ans.append(n[start: end].lower())
     return ans
 
 
@@ -42,14 +43,16 @@ def create_set(directory):
     f = open(directory + '/nl_name.json', 'rb')
     lines = f.readlines()
     train_per = len(lines) * 8 // 10
-    val_per = len(lines) * 9 // 10
+    test_per = len(lines) * 9 // 10
 
     train_nls = [json.loads(lines[i])['nl'] for i in range(train_per)]
     train_names = [json.loads(lines[i])['name'] for i in range(train_per)]
-    val_nls = [json.loads(lines[i])['nl'] for i in range(train_per, val_per)]
-    val_names = [json.loads(lines[i])['name'] for i in range(train_per, val_per)]
-    dev_nls = [json.loads(lines[i])['nl'] for i in range(val_per, len(lines))]
-    dev_names = [json.loads(lines[i])['name'] for i in range(val_per, len(lines))]
+
+    dev_nls = [json.loads(lines[i])['nl'] for i in range(train_per, test_per)]
+    dev_names = [json.loads(lines[i])['name'] for i in range(train_per, test_per)]
+
+    test_nls = [json.loads(lines[i])['nl'] for i in range(test_per, len(lines))]
+    test_names = [json.loads(lines[i])['name'] for i in range(test_per, len(lines))]
     f.close()
 
     with gfile.GFile(directory + '/train.nl', mode="wb") as f:
@@ -58,17 +61,18 @@ def create_set(directory):
     with gfile.GFile(directory + '/train.name', mode="wb") as f:
         for name in train_names:
             f.write(name + b'\n')
-    with gfile.GFile(directory + '/val.nl', mode="wb") as f:
-        for nl in val_nls:
-            f.write(nl + b'\n')
-    with gfile.GFile(directory + '/val.name', mode="wb") as f:
-        for name in val_names:
-            f.write(name + b'\n')
+
     with gfile.GFile(directory + '/dev.nl', mode="wb") as f:
         for nl in dev_nls:
             f.write(nl + b'\n')
     with gfile.GFile(directory + '/dev.name', mode="wb") as f:
         for name in dev_names:
+            f.write(name + b'\n')
+    with gfile.GFile(directory + '/test.nl', mode="wb") as f:
+        for nl in test_nls:
+            f.write(nl + b'\n')
+    with gfile.GFile(directory + '/test.name', mode="wb") as f:
+        for name in test_names:
             f.write(name + b'\n')
 
 
@@ -199,7 +203,10 @@ def sentence_to_token_ids(sentence, vocabulary,
     a list of integers, the token-ids for the sentence.
   """
 
-    words = sentence
+    if tokenizer:
+        words = tokenizer(sentence)
+    else:
+        words = basic_tokenizer(sentence)
     if not normalize_digits:
         return [vocabulary.get(w, UNK_ID) for w in words]
     # Normalize digits by 0 before looking words up in the vocabulary.
@@ -257,6 +264,11 @@ def prepare_data(data_dir, nl_vocab_size, name_vocab_size, tokenizer=None):
     data_to_token_ids(data_dir + "/dev.name", name_dev_ids_path, name_vocab_path, camel_cut)
     data_to_token_ids(data_dir + "/dev.nl", nl_dev_ids_path, nl_vocab_path, tokenizer)
 
+    # Create token ids for the test data.
+    name_test_ids_path = data_dir + ("/test.ids%d.name" % name_vocab_size)
+    nl_test_ids_path = data_dir + ("/test.ids%d.nl" % nl_vocab_size)
+    data_to_token_ids(data_dir + "/test.name", name_test_ids_path, name_vocab_path, camel_cut)
+    data_to_token_ids(data_dir + "/test.nl", nl_test_ids_path, nl_vocab_path, tokenizer)
     return (nl_train_ids_path, name_train_ids_path,
             nl_dev_ids_path, name_dev_ids_path,
             nl_vocab_path, name_vocab_path)
