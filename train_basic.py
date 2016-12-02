@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import json
 import math
 import os
 import random
@@ -30,6 +31,7 @@ tf.app.flags.DEFINE_integer("nl_vocab_size", 15000, "Natural language vocabulary
 tf.app.flags.DEFINE_integer("name_vocab_size", 15000, "Identifier vocabulary size.")
 tf.app.flags.DEFINE_string("data_dir", "data/param", "Data directory")
 tf.app.flags.DEFINE_string("train_dir", "data/param", "Training directory.")
+tf.app.flags.DEFINE_string("test_dir", "data/param", "Testing directory")
 tf.app.flags.DEFINE_integer("max_train_data_size", 0,
                             "Limit on the size of training data (0: no limit).")
 tf.app.flags.DEFINE_integer("steps_per_checkpoint", 200,
@@ -114,7 +116,7 @@ def create_model(session, forward_only):
 
 def train():
     """Train a nl->name translation model using identifier-nl data."""
-    # Prepare WMT data.
+
     print("Preparing the data in %s" % FLAGS.data_dir)
     nl_train, name_train, nl_dev, name_dev, _, _ = data_util.prepare_data(
         FLAGS.data_dir, FLAGS.nl_vocab_size, FLAGS.name_vocab_size)
@@ -200,7 +202,7 @@ def decode():
         nl_vocab_path = os.path.join(FLAGS.data_dir,
                                      "vocab%d.nl" % FLAGS.nl_vocab_size)
         name_vocab_path = os.path.join(FLAGS.data_dir,
-                                     "vocab%d.fr" % FLAGS.name_vocab_size)
+                                     "vocab%d.name" % FLAGS.name_vocab_size)
         nl_vocab, _ = data_util.initialize_vocabulary(nl_vocab_path)
         _, rev_name_vocab = data_util.initialize_vocabulary(name_vocab_path)
 
@@ -236,6 +238,91 @@ def decode():
             print("> ", end="")
             sys.stdout.flush()
             sentence = sys.stdin.readline()
+
+
+def evaluate():
+    with tf.Session as sess:
+        model = create_model(sess, True)
+        print("Reading test data")
+        test_nl_path = FLAGS.test_dir + '/test.ids' + FLAGS.nl_vocab_size + '.nl'
+        test_name_path = FLAGS.test_dir + '/test.ids' + FLAGS.nl_vocab_size + '.name'
+        test_set = read_data(test_nl_path, test_name_path)
+        for i in range(20):
+            for bucket_id in range(len(_buckets)):
+                if len(test_set[bucket_id]) == 0:
+                    print("  eval: empty bucket %d" % (bucket_id))
+                    continue
+                encoder_inputs, decoder_inputs, target_weights = model.get_batch(
+                    test_set, bucket_id)
+                _, eval_loss, _ = model.step(sess, encoder_inputs, decoder_inputs,
+                                             target_weights, bucket_id, True)
+                eval_ppx = math.exp(float(eval_loss)) if eval_loss < 300 else float(
+                    "inf")
+                print("  eval: bucket %d perplexity %.2f" % (bucket_id, eval_ppx))
+
+
+def test():
+    test_nl_path = FLAGS.test_dir + '/test.ids' + str(FLAGS.nl_vocab_size) + '.nl'
+    test_name_path = FLAGS.test_dir + '/test.ids' + str(FLAGS.nl_vocab_size) + '.name'
+    test_set = read_data(test_nl_path, test_name_path)
+    nl_vocab_path = os.path.join(FLAGS.data_dir,
+                                 "vocab%d.nl" % FLAGS.nl_vocab_size)
+    name_vocab_path = os.path.join(FLAGS.data_dir,
+                                   "vocab%d.name" % FLAGS.name_vocab_size)
+    nl_vocab, _ = data_util.initialize_vocabulary(nl_vocab_path)
+    _, rev_name_vocab = data_util.initialize_vocabulary(name_vocab_path)
+    with tf.Session() as sess:
+        model = create_model(sess, True)
+        match = 0
+        size = 0
+        results = []
+        for _ in range(100):
+            for bucket_id in range(len(_buckets)):
+                if len(test_set[bucket_id]) == 0:
+                    print("  eval: empty bucket %d" % (bucket_id))
+                    continue
+                encoder_inputs, decoder_inputs, targets_weights = model.get_batch(test_set, bucket_id)
+                _, _, output_logits = model.step(
+                    sess,
+                    encoder_inputs,
+                    decoder_inputs,
+                    targets_weights,
+                    bucket_id,
+                    True
+                )
+                np_y = np.array(output_logits)
+                np_y_ = np.array(decoder_inputs)
+                for i in range(model.batch_size):
+                    y = np_y[:, i]
+                    outputs = []
+                    for logit in y:
+                        outputs.append(np.argmax(logit))
+                    y_ = np_y_[:, i]
+                    targets = []
+                    for logit in y_:
+                        targets.append(logit)
+
+                    if data_util.EOS_ID in outputs:
+                        outputs = outputs[:outputs.index(data_util.EOS_ID)]
+                    if data_util.GO_ID in targets:
+                        targets = targets[targets.index(data_util.GO_ID) + 1:]
+                    for j in range(len(outputs)):
+                        if outputs[j] != targets[j]:
+                            break
+                        elif j == len(outputs) - 1 and outputs[j] == targets[j]:
+                            match = match + 1
+                    t = [rev_name_vocab[target] for target in targets]
+                    o = [rev_name_vocab[output] for output in outputs]
+                    result = {"target": t, "output": o}
+                    results.append(result)
+
+                size += model.batch_size
+                print("{0} / {1} : {2}".format(match, size, match / size))
+        print("{0} / {1} : {2}".format(match, size, match/size))
+        f = open(FLAGS.data_dir + '/evaluate.json', 'w')
+        for result in results:
+            f.write(json.dumps(result) + '\n')
+        f.close()
 
 
 def self_test():
