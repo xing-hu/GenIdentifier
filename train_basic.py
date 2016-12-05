@@ -13,11 +13,11 @@ import logging
 import numpy as np
 import tensorflow as tf
 
-from tensorflow.models.rnn.translate import data_utils
-from tensorflow.models.rnn.translate import seq2seq_model
+#from tensorflow.models.rnn.translate import data_utils
+#from tensorflow.models.rnn.translate import seq2seq_model
 
 import data_util
-
+import seq2seq_model
 tf.app.flags.DEFINE_float("learning_rate", 0.5, "Learning rate.")
 tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.99,
                           "Learning rate decays by this much.")
@@ -26,6 +26,7 @@ tf.app.flags.DEFINE_float("max_gradient_norm", 5.0,
 tf.app.flags.DEFINE_integer("batch_size", 64,
                             "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("size", 1024, "Size of each model layer.")
+tf.app.flags.DEFINE_integer("dropout", 1.0, "dropout.")
 tf.app.flags.DEFINE_integer("num_layers", 2, "Number of layers in the model.")
 tf.app.flags.DEFINE_integer("nl_vocab_size", 15000, "Natural language vocabulary size.")
 tf.app.flags.DEFINE_integer("name_vocab_size", 15000, "Identifier vocabulary size.")
@@ -97,11 +98,13 @@ def create_model(session, forward_only):
         FLAGS.name_vocab_size,
         _buckets,
         FLAGS.size,
+        FLAGS.dropout,
         FLAGS.num_layers,
         FLAGS.max_gradient_norm,
         FLAGS.batch_size,
         FLAGS.learning_rate,
         FLAGS.learning_rate_decay_factor,
+        use_lstm=True,
         forward_only=forward_only,
         dtype=dtype)
     ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
@@ -180,7 +183,7 @@ def train():
                 # Run evals on development set and print their perplexity.
                 for bucket_id in range(len(_buckets)):
                     if len(dev_set[bucket_id]) == 0:
-                        print("  eval: empty bucket %d" % (bucket_id))
+                        print("  eval: empty bucket %d" % bucket_id)
                         continue
                     encoder_inputs, decoder_inputs, target_weights = model.get_batch(
                         dev_set, bucket_id)
@@ -240,27 +243,6 @@ def decode():
             sentence = sys.stdin.readline()
 
 
-def evaluate():
-    with tf.Session as sess:
-        model = create_model(sess, True)
-        print("Reading test data")
-        test_nl_path = FLAGS.test_dir + '/test.ids' + FLAGS.nl_vocab_size + '.nl'
-        test_name_path = FLAGS.test_dir + '/test.ids' + FLAGS.nl_vocab_size + '.name'
-        test_set = read_data(test_nl_path, test_name_path)
-        for i in range(20):
-            for bucket_id in range(len(_buckets)):
-                if len(test_set[bucket_id]) == 0:
-                    print("  eval: empty bucket %d" % (bucket_id))
-                    continue
-                encoder_inputs, decoder_inputs, target_weights = model.get_batch(
-                    test_set, bucket_id)
-                _, eval_loss, _ = model.step(sess, encoder_inputs, decoder_inputs,
-                                             target_weights, bucket_id, True)
-                eval_ppx = math.exp(float(eval_loss)) if eval_loss < 300 else float(
-                    "inf")
-                print("  eval: bucket %d perplexity %.2f" % (bucket_id, eval_ppx))
-
-
 def test():
     test_nl_path = FLAGS.test_dir + '/test.ids' + str(FLAGS.nl_vocab_size) + '.nl'
     test_name_path = FLAGS.test_dir + '/test.ids' + str(FLAGS.nl_vocab_size) + '.name'
@@ -276,49 +258,45 @@ def test():
         match = 0
         size = 0
         results = []
-        for _ in range(100):
-            for bucket_id in range(len(_buckets)):
-                if len(test_set[bucket_id]) == 0:
-                    print("  eval: empty bucket %d" % (bucket_id))
-                    continue
-                encoder_inputs, decoder_inputs, targets_weights = model.get_batch(test_set, bucket_id)
-                _, _, output_logits = model.step(
-                    sess,
-                    encoder_inputs,
-                    decoder_inputs,
-                    targets_weights,
-                    bucket_id,
-                    True
-                )
-                np_y = np.array(output_logits)
-                np_y_ = np.array(decoder_inputs)
-                for i in range(model.batch_size):
-                    y = np_y[:, i]
-                    outputs = []
-                    for logit in y:
-                        outputs.append(np.argmax(logit))
-                    y_ = np_y_[:, i]
-                    targets = []
-                    for logit in y_:
-                        targets.append(logit)
-
+        model.batch_size = 1
+        counter = 0
+        with tf.gfile.GFile(test_nl_path, mode="r") as source_file:
+            with tf.gfile.GFile(test_nl_path, mode="r") as target_file:
+                source, target = source_file.readline(), target_file.readline()
+                while source and target:
+                    counter += 1
+                    if counter % 10000 == 0:
+                        print("  reading data line %d" % counter)
+                        sys.stdout.flush()
+                    source_ids = [int(x) for x in source.split()]
+                    target_ids = [int(x) for x in target.split()]
+                    bucket_id = len(_buckets) - 1
+                    for i, bucket in enumerate(_buckets):
+                        if bucket[0] >= len(source_ids):
+                            bucket_id = i
+                            break
+                        else:
+                            logging.warning("Sentence truncated")
+                    encoder_inputs, decoder_inputs, target_weights = model.get_batch(
+                        {bucket_id: [(source_ids, [])]}, bucket_id)
+                    # Get output logits for the sentence.
+                    _, _, output_logits = model.step(sess, encoder_inputs, decoder_inputs,
+                                                     target_weights, bucket_id, True)
+                    # This is a greedy decoder - outputs are just argmaxes of output_logits.
+                    outputs = [int(np.argmax(logit, axis=1)) for logit in output_logits]
                     if data_util.EOS_ID in outputs:
                         outputs = outputs[:outputs.index(data_util.EOS_ID)]
-                    if data_util.GO_ID in targets:
-                        targets = targets[targets.index(data_util.GO_ID) + 1:]
-                    for j in range(len(outputs)):
-                        if outputs[j] != targets[j]:
+                    for i in range(len(outputs)):
+                        if outputs[i] != target_ids[i]:
                             break
-                        elif j == len(outputs) - 1 and outputs[j] == targets[j]:
+                        elif i == len(outputs) - 1 and outputs[i] == target_ids[i]:
                             match = match + 1
-                    t = [rev_name_vocab[target] for target in targets]
+                    t = [rev_name_vocab[target] for target in target_ids]
                     o = [rev_name_vocab[output] for output in outputs]
                     result = {"target": t, "output": o}
                     results.append(result)
-
-                size += model.batch_size
-                print("{0} / {1} : {2}".format(match, size, match / size))
-        print("{0} / {1} : {2}".format(match, size, match/size))
+                    source, target = source_file.readline(), target_file.readline()
+        print ("acc: %d" % match / counter)
         f = open(FLAGS.data_dir + '/evaluate.json', 'w')
         for result in results:
             f.write(json.dumps(result) + '\n')
