@@ -55,23 +55,23 @@ def create_set(directory):
     test_names = [json.loads(lines[i])['name'] for i in range(test_per, len(lines))]
     f.close()
 
-    with gfile.GFile(directory + '/train.nl', mode="wb") as f:
+    with gfile.GFile(directory + '/train/train.nl', mode="wb") as f:
         for nl in train_nls:
             f.write(nl + b'\n')
-    with gfile.GFile(directory + '/train.name', mode="wb") as f:
+    with gfile.GFile(directory + '/train/train.name', mode="wb") as f:
         for name in train_names:
             f.write(name + b'\n')
 
-    with gfile.GFile(directory + '/dev.nl', mode="wb") as f:
+    with gfile.GFile(directory + '/train/dev.nl', mode="wb") as f:
         for nl in dev_nls:
             f.write(nl + b'\n')
-    with gfile.GFile(directory + '/dev.name', mode="wb") as f:
+    with gfile.GFile(directory + '/train/dev.name', mode="wb") as f:
         for name in dev_names:
             f.write(name + b'\n')
-    with gfile.GFile(directory + '/test.nl', mode="wb") as f:
+    with gfile.GFile(directory + '/test/test.nl', mode="wb") as f:
         for nl in test_nls:
             f.write(nl + b'\n')
-    with gfile.GFile(directory + '/test.name', mode="wb") as f:
+    with gfile.GFile(directory + '/test/test.name', mode="wb") as f:
         for name in test_names:
             f.write(name + b'\n')
 
@@ -249,26 +249,26 @@ def prepare_data(data_dir, nl_vocab_size, name_vocab_size, tokenizer=None):
 
     nl_vocab_path = os.path.join(data_dir, "vocab%d.nl" % nl_vocab_size)
     name_vocab_path = os.path.join(data_dir, "vocab%d.name" % name_vocab_size)
-    create_vocabulary(nl_vocab_path, data_dir + "/train.nl", nl_vocab_size, tokenizer)
-    create_vocabulary(name_vocab_path, data_dir + "/train.name", name_vocab_size, camel_cut)
+    create_vocabulary(nl_vocab_path, data_dir + "/train/train.nl", nl_vocab_size, tokenizer)
+    create_vocabulary(name_vocab_path, data_dir + "/train/train.name", name_vocab_size, camel_cut)
 
     # Create token ids for the training data.
-    name_train_ids_path = data_dir + ("/train.ids%d.name" % name_vocab_size)
-    nl_train_ids_path = data_dir + ("/train.ids%d.nl" % nl_vocab_size)
-    data_to_token_ids(data_dir + "/train.name", name_train_ids_path, name_vocab_path, camel_cut)
-    data_to_token_ids(data_dir + "/train.nl", nl_train_ids_path, nl_vocab_path, tokenizer)
+    name_train_ids_path = data_dir + ("/train/train.ids%d.name" % name_vocab_size)
+    nl_train_ids_path = data_dir + ("/train/train.ids%d.nl" % nl_vocab_size)
+    data_to_token_ids(data_dir + "/train/train.name", name_train_ids_path, name_vocab_path, camel_cut)
+    data_to_token_ids(data_dir + "/train/train.nl", nl_train_ids_path, nl_vocab_path, tokenizer)
 
     # Create token ids for the development data.
-    name_dev_ids_path = data_dir + ("/dev.ids%d.name" % name_vocab_size)
-    nl_dev_ids_path = data_dir + ("/dev.ids%d.nl" % nl_vocab_size)
-    data_to_token_ids(data_dir + "/dev.name", name_dev_ids_path, name_vocab_path, camel_cut)
-    data_to_token_ids(data_dir + "/dev.nl", nl_dev_ids_path, nl_vocab_path, tokenizer)
+    name_dev_ids_path = data_dir + ("/train/dev.ids%d.name" % name_vocab_size)
+    nl_dev_ids_path = data_dir + ("/train/dev.ids%d.nl" % nl_vocab_size)
+    data_to_token_ids(data_dir + "/train/dev.name", name_dev_ids_path, name_vocab_path, camel_cut)
+    data_to_token_ids(data_dir + "/train/dev.nl", nl_dev_ids_path, nl_vocab_path, tokenizer)
 
     # Create token ids for the test data.
-    name_test_ids_path = data_dir + ("/test.ids%d.name" % name_vocab_size)
-    nl_test_ids_path = data_dir + ("/test.ids%d.nl" % nl_vocab_size)
-    data_to_token_ids(data_dir + "/test.name", name_test_ids_path, name_vocab_path, camel_cut)
-    data_to_token_ids(data_dir + "/test.nl", nl_test_ids_path, nl_vocab_path, tokenizer)
+    name_test_ids_path = data_dir + ("/test/test.ids%d.name" % name_vocab_size)
+    nl_test_ids_path = data_dir + ("/test/test.ids%d.nl" % nl_vocab_size)
+    data_to_token_ids(data_dir + "/test/test.name", name_test_ids_path, name_vocab_path, camel_cut)
+    data_to_token_ids(data_dir + "/test/test.nl", nl_test_ids_path, nl_vocab_path, tokenizer)
     return (nl_train_ids_path, name_train_ids_path,
             nl_dev_ids_path, name_dev_ids_path,
             nl_vocab_path, name_vocab_path)

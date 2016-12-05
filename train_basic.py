@@ -23,24 +23,27 @@ tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.99,
                           "Learning rate decays by this much.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 5.0,
                           "Clip gradients to this norm.")
-tf.app.flags.DEFINE_integer("batch_size", 64,
+tf.app.flags.DEFINE_integer("batch_size", 100,
                             "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("size", 1024, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("dropout", 1.0, "dropout.")
 tf.app.flags.DEFINE_integer("num_layers", 2, "Number of layers in the model.")
 tf.app.flags.DEFINE_integer("nl_vocab_size", 15000, "Natural language vocabulary size.")
 tf.app.flags.DEFINE_integer("name_vocab_size", 15000, "Identifier vocabulary size.")
-tf.app.flags.DEFINE_string("data_dir", "data/param", "Data directory")
-tf.app.flags.DEFINE_string("train_dir", "data/param", "Training directory.")
-tf.app.flags.DEFINE_string("test_dir", "data/param", "Testing directory")
+tf.app.flags.DEFINE_string("data_dir", "data/method", "Data directory")
+tf.app.flags.DEFINE_string("train_dir", "data/method/train", "Training directory.")
+tf.app.flags.DEFINE_string("test_dir", "data/method/test", "Testing directory")
+tf.app.flags.DEFINE_string("model_dir", "data/method/model", "model directory")
 tf.app.flags.DEFINE_integer("max_train_data_size", 0,
                             "Limit on the size of training data (0: no limit).")
-tf.app.flags.DEFINE_integer("steps_per_checkpoint", 200,
+tf.app.flags.DEFINE_integer("steps_per_checkpoint", 800,
                             "How many training steps to do per checkpoint.")
 tf.app.flags.DEFINE_boolean("decode", False,
                             "Set to True for interactive decoding.")
 tf.app.flags.DEFINE_boolean("self_test", False,
                             "Run a self-test if this is set to True.")
+tf.app.flags.DEFINE_boolean("test", False,
+                            "Run a test if this is set to True.")
 tf.app.flags.DEFINE_boolean("use_fp16", False,
                             "Train using fp16 instead of fp32.")
 
@@ -107,13 +110,13 @@ def create_model(session, forward_only):
         use_lstm=True,
         forward_only=forward_only,
         dtype=dtype)
-    ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
+    ckpt = tf.train.get_checkpoint_state(FLAGS.model_dir)
     if ckpt and tf.train.checkpoint_exists(ckpt.model_checkpoint_path):
         print("Reading model parameters from %s" % ckpt.model_checkpoint_path)
         model.saver.restore(session, ckpt.model_checkpoint_path)
     else:
         print("Created model with fresh parameters.")
-        session.run(tf.initialize_all_variables())
+        session.run(tf.global_variables_initializer())
     return model
 
 
@@ -148,7 +151,7 @@ def train():
         step_time, loss = 0.0, 0.0
         current_step = 0
         previous_losses = []
-        while True:
+        for i in range(50000):
             # Choose a bucket according to data distribution. We pick a random number
             # in [0, 1] and use the corresponding interval in train_buckets_scale.
             random_number_01 = np.random.random_sample()
@@ -172,12 +175,12 @@ def train():
                 print("global step %d learning rate %.4f step-time %.2f perplexity "
                       "%.2f" % (model.global_step.eval(), model.learning_rate.eval(),
                                 step_time, perplexity))
-                # Decrease learning rate if no improvement was seen over last 3 times.
+                # Decrease learning rate if no improvement was see1000n over last 3 times.
                 if len(previous_losses) > 2 and loss > max(previous_losses[-3:]):
                     sess.run(model.learning_rate_decay_op)
                 previous_losses.append(loss)
                 # Save checkpoint and zero timer and loss.
-                checkpoint_path = os.path.join(FLAGS.train_dir, "translate.ckpt")
+                checkpoint_path = os.path.join(FLAGS.model_dir, "translate.ckpt")
                 model.saver.save(sess, checkpoint_path, global_step=model.global_step)
                 step_time, loss = 0.0, 0.0
                 # Run evals on development set and print their perplexity.
@@ -205,7 +208,7 @@ def decode():
         nl_vocab_path = os.path.join(FLAGS.data_dir,
                                      "vocab%d.nl" % FLAGS.nl_vocab_size)
         name_vocab_path = os.path.join(FLAGS.data_dir,
-                                     "vocab%d.name" % FLAGS.name_vocab_size)
+                                     "vocab%d.name" % FLAGS.name_v1000ocab_size)
         nl_vocab, _ = data_util.initialize_vocabulary(nl_vocab_path)
         _, rev_name_vocab = data_util.initialize_vocabulary(name_vocab_path)
 
@@ -246,7 +249,7 @@ def decode():
 def test():
     test_nl_path = FLAGS.test_dir + '/test.ids' + str(FLAGS.nl_vocab_size) + '.nl'
     test_name_path = FLAGS.test_dir + '/test.ids' + str(FLAGS.nl_vocab_size) + '.name'
-    test_set = read_data(test_nl_path, test_name_path)
+
     nl_vocab_path = os.path.join(FLAGS.data_dir,
                                  "vocab%d.nl" % FLAGS.nl_vocab_size)
     name_vocab_path = os.path.join(FLAGS.data_dir,
@@ -261,7 +264,7 @@ def test():
         model.batch_size = 1
         counter = 0
         with tf.gfile.GFile(test_nl_path, mode="r") as source_file:
-            with tf.gfile.GFile(test_nl_path, mode="r") as target_file:
+            with tf.gfile.GFile(test_name_path, mode="r") as target_file:
                 source, target = source_file.readline(), target_file.readline()
                 while source and target:
                     counter += 1
@@ -296,7 +299,7 @@ def test():
                     result = {"target": t, "output": o}
                     results.append(result)
                     source, target = source_file.readline(), target_file.readline()
-        print ("acc: %d" % match / counter)
+        print ("{0} / {1} acc: {2}".format(match, counter, match / counter))
         f = open(FLAGS.data_dir + '/evaluate.json', 'w')
         for result in results:
             f.write(json.dumps(result) + '\n')
@@ -329,6 +332,8 @@ def main(_):
         self_test()
     elif FLAGS.decode:
         decode()
+    elif FLAGS.test:
+        test()
     else:
         train()
 
